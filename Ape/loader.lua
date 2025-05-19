@@ -1,53 +1,65 @@
-local isfile = isfile or function(file)
-	local suc, res = pcall(function()
-		return readfile(file)
+local HttpService = game:GetService("HttpService")
+local githubUser = "fischermacro"
+local repoName = "ape"
+local branch = "main"
+local repoAPI = "https://api.github.com/repos/" .. githubUser .. "/" .. repoName .. "/contents/"
+local rawBase = "https://raw.githubusercontent.com/" .. githubUser .. "/" .. repoName .. "/" .. branch .. "/"
+
+local function isfile(path)
+	local ok, result = pcall(function() return readfile(path) end)
+	return ok and result and result ~= ""
+end
+
+local function makepath(path)
+	local segments = {}
+	for segment in path:gmatch("[^/]+") do
+		table.insert(segments, segment)
+	end
+	for i = 1, #segments - 1 do
+		local dir = table.concat(segments, "/", 1, i)
+		if not isfolder(dir) then makefolder(dir) end
+	end
+end
+
+local function downloadRaw(path)
+	local url = rawBase .. path
+	local success, result = pcall(function()
+		return game:HttpGet(url)
 	end)
-	return suc and res ~= nil and res ~= ''
-end
-
-local delfile = delfile or function(file)
-	writefile(file, '')
-end
-
-local function downloadFile(path, func)
-	if not isfile(path) then
-		local suc, res = pcall(function()
-			local branch = readfile("ape/meta.txt")
-			local baseUrl = "https://raw.githubusercontent.com/fischermacro/ape/" .. branch .. "/"
-			return game:HttpGet(baseUrl .. path, true)
-		end)
-		if not suc or res == '404: Not Found' then
-			error(res)
-		end
-		if path:find(".lua") then
-			res = "--autogen: do not remove unless customizing persist\n" .. res
-		end
-		writefile("ape/" .. path, res)
+	if not success or result == "404: Not Found" then
+		error("Failed to download: " .. path)
 	end
-	return (func or readfile)("ape/" .. path)
+	return result
 end
 
-local function wipeFolder(path)
-	if not isfolder(path) then return end
-	for _, file in listfiles(path) do
-		if isfile(file) and select(1, readfile(file):find("--autogen")) == 1 then
-			delfile(file)
+local function downloadRecursive(repoPath, localPath)
+	local data = HttpService:JSONDecode(game:HttpGet(repoAPI .. repoPath))
+
+	for _, item in ipairs(data) do
+		if item.type == "file" then
+			local path = localPath .. "/" .. item.name
+			local content = downloadRaw(repoPath .. "/" .. item.name)
+			makepath(path)
+			writefile(path, content)
+		elseif item.type == "dir" then
+			local subRepoPath = repoPath .. "/" .. item.name
+			local subLocalPath = localPath .. "/" .. item.name
+			if not isfolder(subLocalPath) then makefolder(subLocalPath) end
+			downloadRecursive(subRepoPath, subLocalPath)
 		end
 	end
 end
 
-for _, folder in { "ape" } do
-	if not isfolder(folder) then
-		makefolder(folder)
-	end
+-- 📂 Create root
+if not isfolder("ape") then makefolder("ape") end
+
+-- ⬇ Download everything from repo
+downloadRecursive("", "ape")
+
+-- 🚀 Run Gui.Ape.lua after loading
+local entry = "ape/lib/Gui.Ape.lua"
+if isfile(entry) then
+	loadstring(readfile(entry))()
+else
+	warn("Gui.Ape.lua not found in lib/")
 end
-
-if not isfile("ape/meta.txt") then
-	writefile("ape/meta.txt", "main") -- change "main" to your branch if needed
-end
-
--- wipe old cache if needed
-wipeFolder("ape")
-
--- ⬇️ MAIN EXECUTE
-return loadstring(downloadFile("Gui.Ape.lua"), "ape-main")()
