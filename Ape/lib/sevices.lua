@@ -1,0 +1,1 @@
+local number = 10
